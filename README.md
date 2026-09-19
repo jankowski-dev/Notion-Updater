@@ -78,7 +78,7 @@ python -m pytest -q
 |---|---|---|---|
 | `CURRENCY_DATABASE_ID` | да | — | ID базы Notion с валютами |
 | `CURRENCY_CODE_FIELD` | нет | `ID_money` | Поле с числовым кодом валюты |
-| `CURRENCY_RATE_FIELD` | нет | `Money_rate` | Поле, куда пишется курс |
+| `CURRENCY_RATE_FIELD` | нет | `Money_rate` | Поле, куда пишется курс (старое имя — `RATE_FIELD`, поддерживается) |
 | `CURRENCY_UPDATE_HOURS` | нет | `2` | Интервал обновления, часов |
 | `CURRENCY_CRON` | нет | — | Cron-выражение (5 полей). Перебивает интервал |
 | `CURRENCY_CITY` | нет | `Минск` | Город для API Беларусбанка |

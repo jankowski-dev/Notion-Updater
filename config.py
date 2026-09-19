@@ -120,7 +120,8 @@ def parse_currency_config() -> CurrencyConfig | None:
     return CurrencyConfig(
         database_id=_require("CURRENCY_DATABASE_ID", _get_str("CURRENCY_DATABASE_ID")),
         code_field=_get_str("CURRENCY_CODE_FIELD", "ID_money"),
-        rate_field=_get_str("CURRENCY_RATE_FIELD", "Money_rate"),
+        # RATE_FIELD — старое имя переменной из currency-updater (обратная совместимость).
+        rate_field=_get_str("CURRENCY_RATE_FIELD") or _get_str("RATE_FIELD") or "Money_rate",
         update_hours=_get_int("CURRENCY_UPDATE_HOURS", 2),
         cron=_get_str("CURRENCY_CRON"),
         city=_get_str("CURRENCY_CITY", "Минск"),

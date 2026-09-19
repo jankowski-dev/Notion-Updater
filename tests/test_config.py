@@ -14,6 +14,7 @@ RELEVANT = [
     "CURRENCY_DATABASE_ID",
     "CURRENCY_CODE_FIELD",
     "CURRENCY_RATE_FIELD",
+    "RATE_FIELD",
     "CURRENCY_UPDATE_HOURS",
     "CURRENCY_CRON",
     "CURRENCY_CITY",
@@ -62,6 +63,23 @@ def test_currency_defaults(env):
     assert cfg.currency.rate_field == "Money_rate"
     assert cfg.currency.update_hours == 2
     assert cfg.currency.cron == ""
+
+
+def test_currency_rate_field_legacy_alias(env):
+    env.setenv("ENABLE_CRYPTO", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CURRENCY_DATABASE_ID", "db1")
+    env.setenv("RATE_FIELD", "Старый_курс")
+    assert load_config().currency.rate_field == "Старый_курс"
+
+
+def test_currency_rate_field_new_name_wins(env):
+    env.setenv("ENABLE_CRYPTO", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CURRENCY_DATABASE_ID", "db1")
+    env.setenv("CURRENCY_RATE_FIELD", "Новый")
+    env.setenv("RATE_FIELD", "Старый")
+    assert load_config().currency.rate_field == "Новый"
 
 
 def test_crypto_defaults(env):
