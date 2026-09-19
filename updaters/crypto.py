@@ -61,6 +61,13 @@ def get_pages_with_symbols(config: CryptoConfig) -> list[dict]:
                 config.symbol_field,
             )
 
+    if not result and pages:
+        logger.warning(
+            "Не найдено ни одного символа. Проверьте CRYPTO_SYMBOL_FIELD='%s'. Доступные поля: %s",
+            config.symbol_field,
+            ", ".join(pages[0].get("properties", {}).keys()),
+        )
+
     logger.info("Найдено %s страниц криптовалют.", len(result))
     return result
 

@@ -170,7 +170,14 @@ class CurrencyUpdater:
         )
 
         if not unique_currencies:
-            logger.warning("Нет валют для обработки")
+            if pages:
+                logger.warning(
+                    "Не удалось определить валюту ни для одной записи. Проверьте CURRENCY_CODE_FIELD='%s'. Доступные поля: %s",
+                    self.config.code_field,
+                    ", ".join(pages[0].get("properties", {}).keys()),
+                )
+            else:
+                logger.warning("Нет валют для обработки")
             return {"updated": 0, "skipped": len(pages), "errors": 0, "unique_currencies": 0, "api_calls_saved": 0}
 
         start_time = time.time()
