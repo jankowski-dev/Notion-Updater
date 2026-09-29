@@ -5,6 +5,7 @@
 """
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from time import sleep
@@ -17,6 +18,23 @@ from config import CryptoConfig
 logger = logging.getLogger(__name__)
 
 COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets"
+COINGECKO_UA = "Notion-Updater/1.0"
+
+
+def _coingecko_headers() -> dict:
+    """Заголовки для CoinGecko: User-Agent + опциональный API-ключ.
+
+    Ключ снимает блокировку запросов с датацентров (CloudFront 403).
+    Бесплатный demo-ключ: https://www.coingecko.com/en/api/pricing
+    """
+    headers = {"User-Agent": COINGECKO_UA}
+    demo_key = os.getenv("COINGECKO_DEMO_API_KEY")
+    pro_key = os.getenv("COINGECKO_PRO_API_KEY")
+    if demo_key:
+        headers["x_cg_demo_api_key"] = demo_key
+    elif pro_key:
+        headers["x_cg_pro_api_key"] = pro_key
+    return headers
 
 
 def compute_yesterday_price(current_price, price_change_pct):
@@ -91,7 +109,9 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
         retries = 3
         for attempt in range(retries):
             try:
-                response = requests.get(COINGECKO_MARKETS_URL, params=params, timeout=10)
+                response = requests.get(
+                    COINGECKO_MARKETS_URL, params=params, headers=_coingecko_headers(), timeout=10
+                )
                 if response.status_code == 200:
                     data = response.json()
                     for coin_data in data:
@@ -119,6 +139,15 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
                     reset_time = int(response.headers.get("Retry-After", 60))
                     logger.warning("Rate limit от CoinGecko (markets). Ожидание %s секунд...", reset_time)
                     sleep(reset_time)
+                    continue
+                elif response.status_code == 403:
+                    wait = 30 * (attempt + 1)
+                    logger.warning(
+                        "CoinGecko заблокировал запрос (403, вероятно IP датацентра). "
+                        "Повтор через %s сек... Если повторяется — задайте COINGECKO_DEMO_API_KEY.",
+                        wait,
+                    )
+                    sleep(wait)
                     continue
                 else:
                     logger.error(

@@ -95,6 +95,8 @@ python -m pytest -q
 | `CRYPTO_CHUNK_SIZE` | нет | `200` | Размер чанка для запроса к CoinGecko |
 | `CRYPTO_UPDATE_SECONDS` | нет | `300` | Интервал обновления, секунд |
 | `CRYPTO_CRON` | нет | — | Cron-выражение (5 полей). Перебивает интервал |
+| `COINGECKO_DEMO_API_KEY` | нет | — | Бесплатный ключ CoinGecko — снимает блокировку 403 с IP датацентра |
+| `COINGECKO_PRO_API_KEY` | нет | — | Pro-ключ CoinGecko (альтернатива demo) |
 
 ### Привычки (при `ENABLE_HABITS=true`)
 
