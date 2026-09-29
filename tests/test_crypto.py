@@ -1,3 +1,4 @@
+from updaters import crypto
 from updaters.crypto import _coingecko_headers, _symbol_from_props, compute_yesterday_price
 
 
@@ -46,3 +47,33 @@ def test_symbol_from_props_empty_and_wrong_type():
     assert _symbol_from_props({}, "Symbol") == ""
     assert _symbol_from_props({"Symbol": {"type": "number"}}, "Symbol") == ""
     assert _symbol_from_props({"Symbol": {"type": "rich_text", "rich_text": []}}, "Symbol") == ""
+
+
+class _Resp:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self.headers = {}
+        self.text = "blocked"
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_markets_returns_none_on_403(monkeypatch):
+    monkeypatch.setattr(crypto.requests, "get", lambda *a, **k: _Resp(403))
+    monkeypatch.setattr(crypto, "sleep", lambda *a, **k: None)
+    assert crypto._fetch_markets(["bitcoin"], 200) is None
+
+
+def test_fetch_fallback_to_per_coin(monkeypatch):
+    def fake_get(url, **kwargs):
+        if "markets" in url:
+            return _Resp(403)
+        return _Resp(200, {"market_data": {"current_price": {"usd": 100.0}, "price_change_percentage_24h": 25.0}})
+
+    monkeypatch.setattr(crypto.requests, "get", fake_get)
+    monkeypatch.setattr(crypto, "sleep", lambda *a, **k: None)
+    current, yesterday = crypto.fetch_prices_from_coingecko(["bitcoin"], 200)
+    assert current["bitcoin"] == 100.0
+    assert yesterday["bitcoin"] == 80.0

@@ -1,7 +1,10 @@
 """Обновление цен криптовалют в Notion.
 
-Извлечено из crypto-updater/app.py. Источник — CoinGecko /coins/markets.
-Улучшение: база Notion опрашивается один раз за цикл (в исходнике — дважды).
+Извлечено из crypto-updater/app.py. Источник — CoinGecko.
+Улучшения:
+- база Notion опрашивается один раз за цикл (в исходнике — дважды);
+- если /coins/markets заблокирован (403 с IP датацентра), используется
+  резервный запрос каждой монеты через /coins/{id}.
 """
 
 import logging
@@ -17,7 +20,8 @@ from config import CryptoConfig
 
 logger = logging.getLogger(__name__)
 
-COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets"
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
+COINGECKO_MARKETS_URL = f"{COINGECKO_BASE}/coins/markets"
 COINGECKO_UA = "Notion-Updater/1.0"
 
 
@@ -90,8 +94,12 @@ def get_pages_with_symbols(config: CryptoConfig) -> list[dict]:
     return result
 
 
-def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tuple[dict, dict]:
-    logger.info("Запрос текущих и вчерашних цен для %s криптовалют у CoinGecko...", len(coin_ids_list))
+def _fetch_markets(coin_ids_list: list[str], chunk_size: int) -> tuple[dict, dict] | None:
+    """Батч-запрос через /coins/markets. Возвращает None, если не удалось."""
+    logger.info(
+        "Запрос текущих и вчерашних цен для %s криптовалют у CoinGecko (markets)...",
+        len(coin_ids_list),
+    )
     chunks = [coin_ids_list[i : i + chunk_size] for i in range(0, len(coin_ids_list), chunk_size)]
 
     all_current_prices: dict = {}
@@ -106,8 +114,8 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
             "price_change_percentage": "24h",
         }
 
-        retries = 3
-        for attempt in range(retries):
+        success = False
+        for attempt in range(3):
             try:
                 response = requests.get(
                     COINGECKO_MARKETS_URL, params=params, headers=_coingecko_headers(), timeout=10
@@ -145,7 +153,7 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
                         else:
                             logger.debug("%s — нет данных о 24h изменении, вчерашняя цена пропущена.", coin_id)
 
-                    logger.info("Получены цены из markets для чанка %s/%s", i + 1, len(chunks))
+                    success = True
                     break
                 elif response.status_code == 429:
                     reset_time = int(response.headers.get("Retry-After", 60))
@@ -168,19 +176,70 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
                         response.status_code,
                         response.text,
                     )
-                    if attempt == retries - 1:
-                        raise Exception(
-                            f"Не удалось получить цены markets для чанка {i + 1} после {retries} попыток."
-                        )
             except Exception as e:
                 logger.error("Ошибка при запросе markets (чанк %s): %s", i + 1, e)
-                if attempt == retries - 1:
-                    raise e
+
+        if not success:
+            logger.error("Не удалось получить цены markets для чанка %s.", i + 1)
+            return None
         sleep(0.1)
 
     logger.info("Всего получено текущих цен для %s монет.", len(all_current_prices))
     logger.info("Всего получено вчерашних цен для %s монет.", len(all_yesterday_prices))
     return all_current_prices, all_yesterday_prices
+
+
+def _fetch_per_coin(coin_ids_list: list[str]) -> tuple[dict, dict]:
+    """Резерв: запрос каждой монеты через /coins/{id} (markets может быть заблокирован)."""
+    logger.info("Резервный запрос по одной монете для %s монет...", len(coin_ids_list))
+    all_current_prices: dict = {}
+    all_yesterday_prices: dict = {}
+
+    for coin_id in coin_ids_list:
+        for attempt in range(3):
+            try:
+                response = requests.get(
+                    f"{COINGECKO_BASE}/coins/{coin_id}",
+                    headers=_coingecko_headers(),
+                    timeout=15,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    market_data = data.get("market_data") or {}
+                    current_price = (market_data.get("current_price") or {}).get("usd")
+                    if current_price is not None:
+                        all_current_prices[coin_id] = current_price
+                        change = market_data.get("price_change_percentage_24h")
+                        yesterday = compute_yesterday_price(current_price, change)
+                        if yesterday is not None:
+                            all_yesterday_prices[coin_id] = yesterday
+                    else:
+                        logger.warning("Нет цены для %s в /coins/%s.", coin_id, coin_id)
+                    break
+                elif response.status_code == 429:
+                    reset = int(response.headers.get("Retry-After", 10))
+                    logger.warning("Rate limit (per-coin) для %s. Ожидание %s сек...", coin_id, reset)
+                    sleep(reset)
+                    continue
+                else:
+                    logger.warning("Ответ /coins/%s: %s", coin_id, response.status_code)
+                    sleep(5)
+            except Exception as e:
+                logger.error("Ошибка /coins/%s: %s", coin_id, e)
+                sleep(5)
+        sleep(2.5)
+
+    logger.info("Резерв: получено текущих цен для %s монет.", len(all_current_prices))
+    return all_current_prices, all_yesterday_prices
+
+
+def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tuple[dict, dict]:
+    """Сначала батч-запрос, при неудаче — резерв по одной монете."""
+    result = _fetch_markets(coin_ids_list, chunk_size)
+    if result is not None:
+        return result
+    logger.warning("Батч-запрос markets не удался. Пробуем резервный запрос по одной монете.")
+    return _fetch_per_coin(coin_ids_list)
 
 
 def update_single_notion_page(args) -> tuple[bool, str]:
