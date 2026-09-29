@@ -31,9 +31,9 @@ def _coingecko_headers() -> dict:
     demo_key = os.getenv("COINGECKO_DEMO_API_KEY")
     pro_key = os.getenv("COINGECKO_PRO_API_KEY")
     if demo_key:
-        headers["x_cg_demo_api_key"] = demo_key
+        headers["x-cg-demo-api-key"] = demo_key
     elif pro_key:
-        headers["x_cg_pro_api_key"] = pro_key
+        headers["x-cg-pro-api-key"] = pro_key
     return headers
 
 
@@ -114,6 +114,14 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
                 )
                 if response.status_code == 200:
                     data = response.json()
+                    if not data:
+                        logger.warning(
+                            "CoinGecko вернул пустой ответ (чанк %s). Сырой ответ: %s",
+                            i + 1,
+                            response.text[:500],
+                        )
+                    else:
+                        logger.info("Ответ markets (чанк %s): %s элементов.", i + 1, len(data))
                     for coin_data in data:
                         coin_id = coin_data.get("id")
                         if not coin_id:
@@ -124,7 +132,11 @@ def fetch_prices_from_coingecko(coin_ids_list: list[str], chunk_size: int) -> tu
                         if current_price is not None:
                             all_current_prices[coin_id] = current_price
                         else:
-                            logger.warning("Текущая цена для %s не найдена.", coin_id)
+                            logger.warning(
+                                "Текущая цена для %s не найдена. Объект: %s",
+                                coin_id,
+                                str(coin_data)[:300],
+                            )
 
                         price_change_pct = coin_data.get("price_change_percentage_24h_in_currency")
                         yesterday = compute_yesterday_price(current_price, price_change_pct)

@@ -23,13 +23,13 @@ def test_coingecko_headers_default(monkeypatch):
 def test_coingecko_headers_demo_key(monkeypatch):
     monkeypatch.delenv("COINGECKO_PRO_API_KEY", raising=False)
     monkeypatch.setenv("COINGECKO_DEMO_API_KEY", "demo123")
-    assert _coingecko_headers()["x_cg_demo_api_key"] == "demo123"
+    assert _coingecko_headers()["x-cg-demo-api-key"] == "demo123"
 
 
 def test_coingecko_headers_pro_key(monkeypatch):
     monkeypatch.delenv("COINGECKO_DEMO_API_KEY", raising=False)
     monkeypatch.setenv("COINGECKO_PRO_API_KEY", "pro123")
-    assert _coingecko_headers()["x_cg_pro_api_key"] == "pro123"
+    assert _coingecko_headers()["x-cg-pro-api-key"] == "pro123"
 
 
 def test_symbol_from_props_rich_text():
