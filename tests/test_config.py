@@ -125,6 +125,15 @@ def test_crypto_unknown_provider_raises(env):
         load_config()
 
 
+def test_crypto_empty_providers_raises(env):
+    env.setenv("ENABLE_CURRENCY", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CRYPTO_DATABASE_ID", "db2")
+    env.setenv("CRYPTO_PROVIDERS", " , ")
+    with pytest.raises(ConfigError):
+        load_config()
+
+
 def test_habits_parsing(env):
     env.setenv("ENABLE_CURRENCY", "false")
     env.setenv("ENABLE_CRYPTO", "false")

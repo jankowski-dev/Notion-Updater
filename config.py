@@ -9,6 +9,8 @@ import os
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from prices.providers import PROVIDER_NAMES
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,7 +136,7 @@ def parse_currency_config() -> CurrencyConfig | None:
 
 
 def _parse_providers(value: str) -> list[str]:
-    known = {"kraken", "coinbase"}
+    known = set(PROVIDER_NAMES)
     result = [item.strip().lower() for item in value.split(",") if item.strip()]
     unknown = [item for item in result if item not in known]
     if unknown:

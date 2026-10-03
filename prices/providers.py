@@ -102,6 +102,7 @@ class CoinbaseProvider(Provider):
 
 
 _PROVIDER_CLASSES = {"kraken": KrakenProvider, "coinbase": CoinbaseProvider}
+PROVIDER_NAMES = frozenset(_PROVIDER_CLASSES)
 
 
 def build_providers(names: list[str]) -> dict[str, Provider]:
