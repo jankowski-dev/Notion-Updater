@@ -67,6 +67,27 @@ def test_write_tick_skips_missing_price(monkeypatch):
     assert writes == []
 
 
+def test_write_tick_heartbeat_writes_only_updated(monkeypatch):
+    writes = []
+    monkeypatch.setattr("updaters.crypto.notion.update_page", lambda pid, props: writes.append((pid, props)))
+    cfg = _Cfg()
+    cfg.heartbeat_seconds = 1
+    updater = CryptoUpdater(cfg, _Engine({}))
+    updater._pages = [("p1", "BTC")]
+    updater.engine._snapshot = {"BTC": PricePoint(100.0, 75.0, datetime.now(timezone.utc))}
+    updater.write_tick()  # first write
+    assert len(writes) == 1
+
+    updater.engine._snapshot = {"BTC": PricePoint(100.0, 75.0, datetime.now(timezone.utc))}
+    updater._last_write["p1"] -= 10  # force heartbeat interval to elapse
+    result = updater.write_tick()
+
+    assert len(writes) == 2
+    assert "Price" not in writes[1][1]  # heartbeat updates only Last Updated
+    assert result["heartbeat"] == 1
+    assert result["updated"] == 0
+
+
 def test_resync_resolves_and_sets_coins(monkeypatch):
     monkeypatch.setattr("updaters.crypto.notion.query_database", lambda db: [
         {"id": "p1", "properties": {"Symbol": {"type": "rich_text", "rich_text": [{"text": {"content": "BTC"}}]}}},

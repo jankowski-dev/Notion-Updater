@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from datetime import datetime, timezone
 
 import notion
@@ -78,15 +79,16 @@ class CryptoUpdater:
             self._last.pop(pid, None)
             self._last_write.pop(pid, None)
         self._pages = page_pairs
-        logger.info("Крипта: страниц с монетами %s, подписок %s", len(specs), len(specs))
+        logger.info("Крипта: страниц с монетами %s", len(specs))
 
     def write_tick(self) -> dict:
         snapshot = self.engine.snapshot()
         now = datetime.now(timezone.utc)
-        now_mono = now.timestamp()
+        now_mono = time.monotonic()
         updated = 0
         skipped = 0
         errors = 0
+        heartbeat = 0
 
         for page_id, raw in self._pages:
             point = snapshot.get(raw)
@@ -96,11 +98,11 @@ class CryptoUpdater:
 
             previous = self._last.get(page_id)
             if previous is not None and _same(previous[0], point.price) and _same(previous[1], point.yesterday):
-                heartbeat = self.config.heartbeat_seconds
+                heartbeat_seconds = self.config.heartbeat_seconds
                 last_write = self._last_write.get(page_id, 0.0)
-                if heartbeat and (now_mono - last_write) >= heartbeat:
+                if heartbeat_seconds and (now_mono - last_write) >= heartbeat_seconds:
                     if self._write(page_id, point.price, point.yesterday, heartbeat_only=True):
-                        updated += 1
+                        heartbeat += 1
                         self._last_write[page_id] = now_mono
                     else:
                         errors += 1
@@ -115,8 +117,8 @@ class CryptoUpdater:
             else:
                 errors += 1
 
-        logger.info("Крипта: записано=%s пропущено=%s ошибок=%s (из %s)", updated, skipped, errors, len(self._pages))
-        return {"updated": updated, "skipped": skipped, "errors": errors}
+        logger.info("Крипта: записано=%s пропущено=%s ошибок=%s пульс=%s (из %s)", updated, skipped, errors, heartbeat, len(self._pages))
+        return {"updated": updated, "skipped": skipped, "errors": errors, "heartbeat": heartbeat}
 
     def _write(self, page_id: str, price: float, yesterday: float | None, heartbeat_only: bool = False) -> bool:
         props: dict = {self.config.updated_field: {"date": {"start": datetime.now(timezone.utc).isoformat()}}}
