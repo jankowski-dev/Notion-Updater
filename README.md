@@ -5,7 +5,7 @@
 | Модуль | Что делает | Источник |
 |---|---|---|
 | `currency` | Курсы валют с API Беларусбанка → Notion | `currency-updater` |
-| `crypto` | Цены криптовалют с CoinGecko → Notion | `crypto-updater` |
+| `crypto` | Цены криптовалют с websocket (Kraken + Coinbase) → Notion | `crypto-updater` |
 | `habits` | Ежедневный `+1` к счётчикам привычек в Notion | `Nexter.Bot` (часть про привычки) |
 
 Один процесс, один Railway-сервис, планировщик APScheduler с тремя независимыми задачами.
@@ -21,6 +21,11 @@ updaters/
   currency.py         # логика валют
   crypto.py           # логика крипты
   habits.py           # логика привычек
+prices/
+  models.py           # модели рыночных данных
+  symbols.py          # разрешение символов Notion в биржевые пары
+  providers.py        # websocket-провайдеры Kraken и Coinbase
+  engine.py           # движок: соединения, кэш цен, подписки
 tests/                # pytest
 ```
 
@@ -88,15 +93,16 @@ python -m pytest -q
 | Переменная | Обязательна | По умолчанию | Описание |
 |---|---|---|---|
 | `CRYPTO_DATABASE_ID` | да | — | ID базы Notion с монетами |
-| `CRYPTO_SYMBOL_FIELD` | нет | `Symbol` | Поле с символом/ID монеты (CoinGecko id) |
+| `CRYPTO_SYMBOL_FIELD` | нет | `Symbol` | Поле с монетой: пара (`BTC-USD`), тикер (`BTC`) или CoinGecko-id (`bitcoin`) |
 | `CRYPTO_PRICE_FIELD` | нет | `Price` | Поле текущей цены |
 | `CRYPTO_UPDATED_FIELD` | нет | `Last Updated` | Поле времени обновления |
 | `CRYPTO_YESTERDAY_PRICE_FIELD` | нет | `Price (Yesterday)` | Поле вчерашней цены |
-| `CRYPTO_CHUNK_SIZE` | нет | `200` | Размер чанка для запроса к CoinGecko |
-| `CRYPTO_UPDATE_SECONDS` | нет | `300` | Интервал обновления, секунд |
-| `CRYPTO_CRON` | нет | — | Cron-выражение (5 полей). Перебивает интервал |
-| `COINGECKO_DEMO_API_KEY` | нет | — | Бесплатный ключ CoinGecko — снимает блокировку 403 с IP датацентра |
-| `COINGECKO_PRO_API_KEY` | нет | — | Pro-ключ CoinGecko (альтернатива demo) |
+| `CRYPTO_TICK_SECONDS` | нет | `30` | Интервал записи в Notion, секунд (минимум 20) |
+| `CRYPTO_RESYNC_SECONDS` | нет | `300` | Как часто перечитывать базу на новые монеты, секунд |
+| `CRYPTO_PROVIDERS` | нет | `kraken,coinbase` | Провайдеры websocket в порядке приоритета |
+| `CRYPTO_STALE_SECONDS` | нет | `300` | Не писать цену старше этого возраста, секунд |
+| `CRYPTO_HEARTBEAT_SECONDS` | нет | `0` | «Пульс» для неизменившихся (0 — выключен) |
+| `COINGECKO_DEMO_API_KEY` | нет | — | Для ленивого `/coins/list` (только если используешь CoinGecko-id) |
 
 ### Привычки (при `ENABLE_HABITS=true`)
 
@@ -111,7 +117,7 @@ python -m pytest -q
 ## Поведение
 
 - **Валюты**: при старте выполняется сразу, далее по интервалу. Курсы берутся с Беларусбанка одним запросом на все валюты. Если валюты нет в ответе — используется фиксированный курс-заглушка (как в исходном проекте).
-- **Крипта**: при старте выполняется сразу, далее по интервалу. База Notion опрашивается один раз за цикл. Запись страниц — параллельно (3 потока), с retry и обработкой `429 Retry-After`. Если `/coins/markets` заблокирован (403 с IP датацентра), автоматически включается резервный запрос каждой монеты через `/coins/{id}`.
+- **Крипта**: цены приходят push-потоком с websocket (Kraken, при отсутствии пары — Coinbase). Раз в `CRYPTO_TICK_SECONDS` в Notion записываются только изменившиеся цены (не изменилось — запроса нет). База Notion перечитывается раз в `CRYPTO_RESYNC_SECONDS`: новые монеты подхватываются автоматически, без правок кода или конфига. Поле `Symbol` понимает пару (`BTC-USD`), тикер (`BTC`) или CoinGecko-id (`bitcoin`).
 - **Привычки**: раз в сутки в `HABITS_INCREMENT_TIME` по часовому поясу `TZ`. Инкрементируются только привычки из `HABITS_LIST`.
 
 ## Известные точки для будущих улучшений
