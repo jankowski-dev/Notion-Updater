@@ -26,12 +26,19 @@ _TICKER_RE = re.compile(r"^[A-Z0-9]{2,10}$")
 PAIR_SEPARATOR = {"kraken": "/", "coinbase": "-"}
 PROVIDER_QUOTES = {"kraken": ["USD", "USDT"], "coinbase": ["USD", "USDT"]}
 
+# Явной парой считаем только пары с поддерживаемой котировкой. Иначе значение
+# вида "bitcoin-cash" (CoinGecko-id) ошибочно распалось бы на BASE/QUOTE.
+SUPPORTED_QUOTES = frozenset(q for quotes in PROVIDER_QUOTES.values() for q in quotes)
+
 
 def parse_explicit_pair(value: str) -> tuple[str, str] | None:
     m = _PAIR_RE.match(value.strip())
     if not m:
         return None
-    return m.group(1).upper(), m.group(2).upper()
+    base, quote = m.group(1).upper(), m.group(2).upper()
+    if quote not in SUPPORTED_QUOTES:
+        return None
+    return base, quote
 
 
 def format_pair(provider: str, base: str, quote: str) -> str:
@@ -42,6 +49,8 @@ def _candidates(base: str, providers: list[str]) -> list[ResolvedCoin]:
     out: list[ResolvedCoin] = []
     for provider in providers:
         for quote in PROVIDER_QUOTES[provider]:
+            if quote == base:
+                continue
             out.append(ResolvedCoin(provider, format_pair(provider, base, quote)))
     return out
 

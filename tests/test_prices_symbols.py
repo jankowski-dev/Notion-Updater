@@ -45,6 +45,33 @@ def test_coingecko_list_matches_id_and_symbol(monkeypatch):
     assert cg.symbol_for("nope") is None
 
 
+def test_parse_explicit_pair_rejects_unsupported_quote():
+    # CoinGecko-id с дефисом не должен трактоваться как биржевая пара
+    assert parse_explicit_pair("bitcoin-cash") is None
+    assert parse_explicit_pair("sahara-ai") is None
+    assert parse_explicit_pair("based-one") is None
+
+
+def test_resolve_hyphenated_id_uses_lookup():
+    got = resolve_candidates(
+        "bitcoin-cash", PROVIDERS, lookup=lambda v: "bch" if v == "bitcoin-cash" else None
+    )
+    assert got == [
+        ResolvedCoin("kraken", "BCH/USD"),
+        ResolvedCoin("kraken", "BCH/USDT"),
+        ResolvedCoin("coinbase", "BCH-USD"),
+        ResolvedCoin("coinbase", "BCH-USDT"),
+    ]
+
+
+def test_resolve_ticker_skips_self_pair():
+    got = resolve_candidates("USDT", PROVIDERS)
+    pairs = {c.pair for c in got}
+    assert "USDT/USDT" not in pairs
+    assert "USDT-USDT" not in pairs
+    assert ResolvedCoin("kraken", "USDT/USD") in got
+
+
 def test_coingecko_list_failure_cooldown(monkeypatch):
     cg = CoinGeckoList(cooldown_seconds=300.0)
     calls = {"n": 0}
