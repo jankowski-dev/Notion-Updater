@@ -72,6 +72,14 @@ def test_resolve_ticker_skips_self_pair():
     assert ResolvedCoin("kraken", "USDT/USD") in got
 
 
+def test_coingecko_list_id_for(monkeypatch):
+    cg = CoinGeckoList()
+    monkeypatch.setattr(cg, "_fetch", lambda: [{"id": "bitcoin", "symbol": "btc"}])
+    assert cg.id_for("bitcoin") == "bitcoin"
+    assert cg.id_for("BTC") == "bitcoin"
+    assert cg.id_for("nope") is None
+
+
 def test_coingecko_list_failure_cooldown(monkeypatch):
     cg = CoinGeckoList(cooldown_seconds=300.0)
     calls = {"n": 0}

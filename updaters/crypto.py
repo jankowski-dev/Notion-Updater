@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import notion
 from config import CryptoConfig
+from prices.coingecko_rest import CoinGeckoRest
 from prices.engine import PriceEngine
 from prices.models import CoinSpec
 from prices.symbols import CoinGeckoList, resolve_candidates
@@ -42,12 +43,21 @@ def _same(a: float | None, b: float | None) -> bool:
 
 
 class CryptoUpdater:
-    def __init__(self, config: CryptoConfig, engine: PriceEngine, dry_run: bool = False) -> None:
+    def __init__(
+        self,
+        config: CryptoConfig,
+        engine: PriceEngine,
+        dry_run: bool = False,
+        coingecko: CoinGeckoList | None = None,
+        rest: CoinGeckoRest | None = None,
+    ) -> None:
         self.config = config
         self.engine = engine
         self.dry_run = dry_run
-        self._coingecko = CoinGeckoList()
+        self._coingecko = coingecko or CoinGeckoList()
+        self.rest = rest or CoinGeckoRest()
         self._pages: list[tuple[str, str]] = []  # (page_id, raw_symbol)
+        self._cg_ids: dict[str, str] = {}  # page_id -> CoinGecko-id (для REST-fallback)
         self._last: dict[str, tuple[float, float | None]] = {}
         self._last_write: dict[str, float] = {}
         self._lock = threading.Lock()
@@ -63,6 +73,7 @@ class CryptoUpdater:
 
         specs: list[CoinSpec] = []
         page_pairs: list[tuple[str, str]] = []
+        cg_ids: dict[str, str] = {}
         for page in pages:
             page_id = page["id"]
             raw = _symbol_from_props(page.get("properties", {}), self.config.symbol_field)
@@ -70,11 +81,14 @@ class CryptoUpdater:
                 logger.warning("Крипта: у страницы %s пустое поле '%s'", page_id, self.config.symbol_field)
                 continue
             candidates = resolve_candidates(raw, self.config.providers, self._coingecko.symbol_for)
-            if not candidates:
+            cg_id = self._coingecko.id_for(raw)
+            if not candidates and not cg_id:
                 logger.warning("Крипта: не удалось разрешить символ %r (страница %s)", raw, page_id)
                 continue
             specs.append(CoinSpec(page_id=page_id, raw_symbol=raw, candidates=candidates))
             page_pairs.append((page_id, raw))
+            if cg_id:
+                cg_ids[page_id] = cg_id
 
         self.engine.set_coins(specs)
         with self._lock:
@@ -84,12 +98,28 @@ class CryptoUpdater:
                 self._last_write.pop(pid, None)
                 self._stale_warned.discard(pid)
             self._pages = page_pairs
+            self._cg_ids = cg_ids
         logger.info("Крипта: страниц с монетами %s", len(specs))
+        self.refresh_rest()
 
-    def write_tick(self) -> dict:
+    def refresh_rest(self) -> None:
+        """Подтягивает CoinGecko /simple/price для монет без websocket-цены."""
+        if self.config.rest_seconds <= 0:
+            return
         snapshot = self.engine.snapshot()
         with self._lock:
             pages = list(self._pages)
+            cg_ids = dict(self._cg_ids)
+        ids = [cg_ids[pid] for pid, raw in pages if raw not in snapshot and cg_ids.get(pid)]
+        self.rest.refresh(ids)
+
+    def write_tick(self) -> dict:
+        ws_prices = self.engine.snapshot()
+        rest_prices = self.rest.snapshot()
+        with self._lock:
+            pages = list(self._pages)
+            cg_ids = dict(self._cg_ids)
+        now_utc = datetime.now(timezone.utc)
         now_mono = time.monotonic()
         updated = 0
         skipped = 0
@@ -97,7 +127,12 @@ class CryptoUpdater:
         heartbeat = 0
 
         for page_id, raw in pages:
-            point = snapshot.get(raw)
+            point = ws_prices.get(raw)
+            cg_id = cg_ids.get(page_id)
+            if point is None and cg_id:
+                point = rest_prices.get(cg_id)
+            if point is not None and (now_utc - point.ts).total_seconds() > self.config.stale_seconds:
+                point = None
             if point is None:
                 with self._lock:
                     first_time = page_id not in self._stale_warned

@@ -190,3 +190,28 @@ README обновляется: раздел крипты, таблица env, п
 - `scheduler` содержит `crypto_write` и `crypto_resync`.
 - На Railway: `Last Updated` в Notion обновляется; при отсутствии изменений цены
   запросов `PATCH` нет.
+
+## Аддендум: REST-fallback на CoinGecko (DEX/неликвид)
+
+Дата: 2026-10-03
+
+**Причина.** Kraken и Coinbase не листят ряд монет из базы (DEX-токены, неликвид).
+Websocket физически не может их покрыть, из-за чего такие строки оставались без цены.
+
+**Решение.** Для монет, отсутствующих в websocket-снимке, раз в
+`CRYPTO_REST_SECONDS` (по умолчанию 60с; `0` — выключить) выполняется один
+батч-запрос CoinGecko `/simple/price` (`ids=...`, `vs_currencies=usd`,
+`include_24hr_change=true`). «Вчера» = `price / (1 + 24h_change/100)`.
+Запрос идёт только за непокрытыми id, поэтому не зависит от их числа.
+
+**Модули.** `prices/coingecko_rest.py` (`CoinGeckoRest`); `CoinGeckoList.id_for()`
+даёт CoinGecko-id для значения; `CryptoUpdater` хранит `_cg_ids: page_id → id`,
+метод `refresh_rest()` (задача `crypto_rest`), а `write_tick` берёт цену из
+websocket-снимка, иначе из REST-кэша (с тем же порогом устаревания).
+
+**Новая монета.** resync видит новую строку → резолвит и сразу вызывает
+`refresh_rest()`; далее значение поддерживается задачей `crypto_rest`. Правок
+кода/конфига не требуется.
+
+**Деградация.** Если CoinGecko недоступен — REST-цены просто отсутствуют,
+монета получает тот же warning «нет свежей цены»; процесс не падает.

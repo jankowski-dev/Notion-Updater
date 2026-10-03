@@ -105,9 +105,19 @@ def build_scheduler(config: Config, engine: PriceEngine | None = None) -> Backgr
             next_run_time=now,
             **_JOB_DEFAULTS,
         )
+        if config.crypto.rest_seconds > 0:
+            scheduler.add_job(
+                _wrap(updater.refresh_rest, "rest"),
+                "interval",
+                id="crypto_rest",
+                replace_existing=True,
+                seconds=config.crypto.rest_seconds,
+                next_run_time=now,
+                **_JOB_DEFAULTS,
+            )
         logger.info(
-            "crypto_write: каждые %sс; crypto_resync: каждые %sс",
-            config.crypto.tick_seconds, config.crypto.resync_seconds,
+            "crypto_write: каждые %sс; crypto_resync: каждые %sс; crypto_rest: каждые %sс",
+            config.crypto.tick_seconds, config.crypto.resync_seconds, config.crypto.rest_seconds,
         )
 
     if config.enable_habits and config.habits:

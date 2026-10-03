@@ -28,6 +28,7 @@ RELEVANT = [
     "CRYPTO_PROVIDERS",
     "CRYPTO_STALE_SECONDS",
     "CRYPTO_HEARTBEAT_SECONDS",
+    "CRYPTO_REST_SECONDS",
     "HABITS_DATABASE_ID",
     "HABITS_LIST",
     "HABITS_NAME_FIELD",
@@ -98,6 +99,7 @@ def test_crypto_defaults(env):
     assert cfg.crypto.providers == ["kraken", "coinbase"]
     assert cfg.crypto.stale_seconds == 300
     assert cfg.crypto.heartbeat_seconds == 0
+    assert cfg.crypto.rest_seconds == 60
 
 
 def test_crypto_tick_clamped_to_20(env):

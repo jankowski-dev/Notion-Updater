@@ -24,7 +24,7 @@ def _config():
             database_id="db", symbol_field="Symbol", price_field="Price",
             updated_field="Last Updated", yesterday_price_field="Price (Yesterday)",
             tick_seconds=30, resync_seconds=300, providers=["kraken"],
-            stale_seconds=300, heartbeat_seconds=0,
+            stale_seconds=300, heartbeat_seconds=0, rest_seconds=60,
         ),
         habits=None,
     )
@@ -32,6 +32,16 @@ def _config():
 
 def test_scheduler_registers_crypto_jobs():
     scheduler = build_scheduler(_config(), engine=_Engine())
+    ids = {job.id for job in scheduler.get_jobs()}
+    assert ids == {"crypto_write", "crypto_resync", "crypto_rest"}
+    scheduler.start(paused=True)
+    scheduler.shutdown(wait=False)
+
+
+def test_scheduler_skips_rest_when_disabled():
+    config = _config()
+    config.crypto.rest_seconds = 0
+    scheduler = build_scheduler(config, engine=_Engine())
     ids = {job.id for job in scheduler.get_jobs()}
     assert ids == {"crypto_write", "crypto_resync"}
     scheduler.start(paused=True)
