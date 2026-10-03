@@ -53,7 +53,9 @@ class PriceEngine:
 
     # ---- public API ----
     def set_coins(self, specs: list[CoinSpec]) -> None:
-        desired: dict[str, list[ResolvedCoin]] = {spec.raw_symbol: spec.candidates for spec in specs}
+        desired: dict[str, list[ResolvedCoin]] = {
+            spec.raw_symbol: list(spec.candidates) for spec in specs
+        }
         with self._lock:
             self._desired = desired
             for name in self._needed:
@@ -108,7 +110,10 @@ class PriceEngine:
                             raise TimeoutError("нет сообщений от провайдера")
                         continue
                     last_msg = time.monotonic()
-                    self._handle_message(provider, raw)
+                    try:
+                        self._handle_message(provider, raw)
+                    except Exception as e:  # noqa: BLE001 — одно кривое сообщение не рвёт соединение
+                        logger.warning("Провайдер %s: ошибка обработки сообщения: %s", name, e)
             except Exception as e:  # noqa: BLE001 — поток не должен падать
                 if self._stop.is_set():
                     break
