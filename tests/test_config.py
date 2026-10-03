@@ -23,9 +23,11 @@ RELEVANT = [
     "CRYPTO_PRICE_FIELD",
     "CRYPTO_UPDATED_FIELD",
     "CRYPTO_YESTERDAY_PRICE_FIELD",
-    "CRYPTO_CHUNK_SIZE",
-    "CRYPTO_UPDATE_SECONDS",
-    "CRYPTO_CRON",
+    "CRYPTO_TICK_SECONDS",
+    "CRYPTO_RESYNC_SECONDS",
+    "CRYPTO_PROVIDERS",
+    "CRYPTO_STALE_SECONDS",
+    "CRYPTO_HEARTBEAT_SECONDS",
     "HABITS_DATABASE_ID",
     "HABITS_LIST",
     "HABITS_NAME_FIELD",
@@ -91,7 +93,45 @@ def test_crypto_defaults(env):
     assert cfg.crypto.price_field == "Price"
     assert cfg.crypto.updated_field == "Last Updated"
     assert cfg.crypto.yesterday_price_field == "Price (Yesterday)"
-    assert cfg.crypto.update_seconds == 300
+    assert cfg.crypto.tick_seconds == 30
+    assert cfg.crypto.resync_seconds == 300
+    assert cfg.crypto.providers == ["kraken", "coinbase"]
+    assert cfg.crypto.stale_seconds == 300
+    assert cfg.crypto.heartbeat_seconds == 0
+
+
+def test_crypto_tick_clamped_to_20(env):
+    env.setenv("ENABLE_CURRENCY", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CRYPTO_DATABASE_ID", "db2")
+    env.setenv("CRYPTO_TICK_SECONDS", "5")
+    assert load_config().crypto.tick_seconds == 20
+
+
+def test_crypto_providers_parsed(env):
+    env.setenv("ENABLE_CURRENCY", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CRYPTO_DATABASE_ID", "db2")
+    env.setenv("CRYPTO_PROVIDERS", "coinbase")
+    assert load_config().crypto.providers == ["coinbase"]
+
+
+def test_crypto_unknown_provider_raises(env):
+    env.setenv("ENABLE_CURRENCY", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CRYPTO_DATABASE_ID", "db2")
+    env.setenv("CRYPTO_PROVIDERS", "binance")
+    with pytest.raises(ConfigError):
+        load_config()
+
+
+def test_crypto_empty_providers_raises(env):
+    env.setenv("ENABLE_CURRENCY", "false")
+    env.setenv("ENABLE_HABITS", "false")
+    env.setenv("CRYPTO_DATABASE_ID", "db2")
+    env.setenv("CRYPTO_PROVIDERS", " , ")
+    with pytest.raises(ConfigError):
+        load_config()
 
 
 def test_habits_parsing(env):

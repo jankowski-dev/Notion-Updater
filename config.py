@@ -4,9 +4,14 @@
 и позволяет менять окружение без перезапуска импорта.
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from prices.providers import PROVIDER_NAMES
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
@@ -73,9 +78,11 @@ class CryptoConfig:
     price_field: str
     updated_field: str
     yesterday_price_field: str
-    chunk_size: int
-    update_seconds: int
-    cron: str
+    tick_seconds: int
+    resync_seconds: int
+    providers: list[str]
+    stale_seconds: int
+    heartbeat_seconds: int
 
 
 @dataclass
@@ -128,18 +135,34 @@ def parse_currency_config() -> CurrencyConfig | None:
     )
 
 
+def _parse_providers(value: str) -> list[str]:
+    known = set(PROVIDER_NAMES)
+    result = [item.strip().lower() for item in value.split(",") if item.strip()]
+    unknown = [item for item in result if item not in known]
+    if unknown:
+        raise ConfigError(f"CRYPTO_PROVIDERS: неизвестные провайдеры {unknown}; допустимы {sorted(known)}")
+    if not result:
+        raise ConfigError("CRYPTO_PROVIDERS: пусто")
+    return result
+
+
 def parse_crypto_config() -> CryptoConfig | None:
     if not _get_bool("ENABLE_CRYPTO", True):
         return None
+    for deprecated in ("CRYPTO_UPDATE_SECONDS", "CRYPTO_CHUNK_SIZE", "CRYPTO_CRON"):
+        if _get_str(deprecated):
+            logger.warning("%s устарела и игнорируется (крипта перешла на websocket)", deprecated)
     return CryptoConfig(
         database_id=_require("CRYPTO_DATABASE_ID", _get_str("CRYPTO_DATABASE_ID")),
         symbol_field=_get_str("CRYPTO_SYMBOL_FIELD", "Symbol"),
         price_field=_get_str("CRYPTO_PRICE_FIELD", "Price"),
         updated_field=_get_str("CRYPTO_UPDATED_FIELD", "Last Updated"),
         yesterday_price_field=_get_str("CRYPTO_YESTERDAY_PRICE_FIELD", "Price (Yesterday)"),
-        chunk_size=_get_int("CRYPTO_CHUNK_SIZE", 200),
-        update_seconds=_get_int("CRYPTO_UPDATE_SECONDS", 300),
-        cron=_get_str("CRYPTO_CRON"),
+        tick_seconds=max(20, _get_int("CRYPTO_TICK_SECONDS", 30)),
+        resync_seconds=_get_int("CRYPTO_RESYNC_SECONDS", 300),
+        providers=_parse_providers(_get_str("CRYPTO_PROVIDERS", "kraken,coinbase")),
+        stale_seconds=_get_int("CRYPTO_STALE_SECONDS", 300),
+        heartbeat_seconds=_get_int("CRYPTO_HEARTBEAT_SECONDS", 0),
     )
 
 
