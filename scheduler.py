@@ -12,7 +12,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from config import Config
-from updaters import crypto, currency, habits
+from prices.engine import PriceEngine
+from updaters import currency, habits
+from updaters.crypto import CryptoUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +33,6 @@ def _job_currency(config: Config) -> None:
         result["skipped"],
         result["errors"],
     )
-
-
-def _job_crypto(config: Config) -> None:
-    result = crypto.run(config.crypto, dry_run=config.dry_run)
-    logger.info("Крипта: обновлено=%s ошибок=%s", result["updated"], result["errors"])
 
 
 def _job_habits(config: Config) -> None:
@@ -61,7 +58,7 @@ def _add_cron_or_interval(scheduler, func, job_id, cron, interval_kwargs) -> Non
         logger.info("%s: интервал %s", job_id, interval_kwargs)
 
 
-def build_scheduler(config: Config) -> BackgroundScheduler:
+def build_scheduler(config: Config, engine: PriceEngine | None = None) -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=ZoneInfo(config.timezone))
     logger.info("Часовой пояс планировщика: %s", config.timezone)
 
@@ -74,13 +71,43 @@ def build_scheduler(config: Config) -> BackgroundScheduler:
             {"hours": config.currency.update_hours},
         )
 
-    if config.enable_crypto and config.crypto:
-        _add_cron_or_interval(
-            scheduler,
-            lambda: _job_crypto(config),
-            "crypto",
-            config.crypto.cron,
-            {"seconds": config.crypto.update_seconds},
+    if config.enable_crypto and config.crypto and engine is not None:
+        updater = CryptoUpdater(config.crypto, engine, dry_run=config.dry_run)
+        now = datetime.now(scheduler.timezone)
+
+        def _wrap(action, label):
+            def _run():
+                result = action()
+                if isinstance(result, dict):
+                    logger.info(
+                        "Крипта[%s]: записано=%s пропущено=%s ошибок=%s",
+                        label, result["updated"], result["skipped"], result["errors"],
+                    )
+                else:
+                    logger.info("Крипта[%s]: готово", label)
+            return _run
+
+        scheduler.add_job(
+            _wrap(updater.write_tick, "write"),
+            "interval",
+            id="crypto_write",
+            replace_existing=True,
+            seconds=config.crypto.tick_seconds,
+            next_run_time=now,
+            **_JOB_DEFAULTS,
+        )
+        scheduler.add_job(
+            _wrap(updater.resync, "resync"),
+            "interval",
+            id="crypto_resync",
+            replace_existing=True,
+            seconds=config.crypto.resync_seconds,
+            next_run_time=now,
+            **_JOB_DEFAULTS,
+        )
+        logger.info(
+            "crypto_write: каждые %sс; crypto_resync: каждые %sс",
+            config.crypto.tick_seconds, config.crypto.resync_seconds,
         )
 
     if config.enable_habits and config.habits:

@@ -13,6 +13,8 @@ import time
 from dotenv import load_dotenv
 
 from config import ConfigError, load_config
+from prices.engine import PriceEngine
+from prices.providers import build_providers
 from scheduler import build_scheduler
 
 logger = logging.getLogger("notion_updater")
@@ -47,7 +49,13 @@ def main() -> int:
     logger.info("  DRY_RUN: %s", config.dry_run)
     logger.info("=" * 60)
 
-    scheduler = build_scheduler(config)
+    engine = None
+    if config.enable_crypto and config.crypto:
+        providers = build_providers(config.crypto.providers)
+        engine = PriceEngine(providers, stale_seconds=config.crypto.stale_seconds)
+        engine.start()
+
+    scheduler = build_scheduler(config, engine=engine)
     scheduler.start()
     logger.info("Планировщик запущен. Задач: %s", len(scheduler.get_jobs()))
 
@@ -65,6 +73,8 @@ def main() -> int:
             time.sleep(1)
     finally:
         scheduler.shutdown(wait=False)
+        if engine is not None:
+            engine.stop()
         logger.info("Остановлено.")
     return 0
 
