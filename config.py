@@ -83,6 +83,7 @@ class CryptoConfig:
     providers: list[str]
     stale_seconds: int
     heartbeat_seconds: int
+    rest_seconds: int
 
 
 @dataclass
@@ -163,6 +164,7 @@ def parse_crypto_config() -> CryptoConfig | None:
         providers=_parse_providers(_get_str("CRYPTO_PROVIDERS", "kraken,coinbase")),
         stale_seconds=_get_int("CRYPTO_STALE_SECONDS", 300),
         heartbeat_seconds=_get_int("CRYPTO_HEARTBEAT_SECONDS", 0),
+        rest_seconds=max(0, _get_int("CRYPTO_REST_SECONDS", 60)),
     )
 
 

@@ -87,6 +87,7 @@ class CoinGeckoList:
     def __init__(self, cooldown_seconds: float = 300.0) -> None:
         self._by_id: dict[str, str] = {}
         self._by_symbol: dict[str, str] = {}
+        self._id_by_symbol: dict[str, str] = {}
         self._loaded = False
         self._retry_after = 0.0
         self._cooldown = cooldown_seconds
@@ -97,6 +98,15 @@ class CoinGeckoList:
         key = value.strip().lower()
         return self._by_id.get(key) or self._by_symbol.get(key)
 
+    def id_for(self, value: str) -> str | None:
+        """CoinGecko-id для значения (если это id или известный symbol)."""
+        if not self._loaded and time.monotonic() >= self._retry_after:
+            self._load()
+        key = value.strip().lower()
+        if key in self._by_id:
+            return key
+        return self._id_by_symbol.get(key)
+
     def _load(self) -> None:
         try:
             for item in self._fetch():
@@ -105,6 +115,7 @@ class CoinGeckoList:
                 if cid and symbol:
                     self._by_id[cid.lower()] = symbol
                     self._by_symbol.setdefault(symbol.lower(), symbol)
+                    self._id_by_symbol.setdefault(symbol.lower(), cid)
             self._loaded = True
             logger.info("CoinGecko /coins/list: %s записей", len(self._by_id))
         except Exception as e:  # noqa: BLE001 — справочник необязателен

@@ -15,6 +15,7 @@ class _Cfg:
     providers = ["kraken"]
     stale_seconds = 300
     heartbeat_seconds = 0
+    rest_seconds = 60
 
 
 class _Engine:
@@ -27,6 +28,34 @@ class _Engine:
 
     def snapshot(self):
         return self._snapshot
+
+
+class _CG:
+    """Фейковый CoinGeckoList: без сети."""
+
+    def __init__(self, symbols=None, ids=None):
+        self._symbols = symbols or {}
+        self._ids = ids or {}
+
+    def symbol_for(self, value):
+        return self._symbols.get(value)
+
+    def id_for(self, value):
+        return self._ids.get(value)
+
+
+class _Rest:
+    """Фейковый CoinGeckoRest: без сети."""
+
+    def __init__(self):
+        self.cache = {}
+        self.calls = []
+
+    def snapshot(self):
+        return dict(self.cache)
+
+    def refresh(self, ids):
+        self.calls.append(list(ids))
 
 
 def test_symbol_from_props_rich_text_and_title():
@@ -88,16 +117,6 @@ def test_write_tick_heartbeat_writes_only_updated(monkeypatch):
     assert result["updated"] == 0
 
 
-def test_resync_resolves_and_sets_coins(monkeypatch):
-    monkeypatch.setattr("updaters.crypto.notion.query_database", lambda db: [
-        {"id": "p1", "properties": {"Symbol": {"type": "rich_text", "rich_text": [{"text": {"content": "BTC"}}]}}},
-    ])
-    updater = CryptoUpdater(_Cfg(), _Engine({}))
-    updater.resync()
-    assert [s.raw_symbol for s in updater.engine.coins] == ["BTC"]
-    assert updater.engine.coins[0].candidates[0].pair == "BTC/USD"
-
-
 def test_write_tick_logs_stale_warning(monkeypatch, caplog):
     import logging
 
@@ -108,3 +127,63 @@ def test_write_tick_logs_stale_warning(monkeypatch, caplog):
         result = updater.write_tick()
     assert result["skipped"] == 1
     assert any("нет свежей цены" in r.message for r in caplog.records)
+
+
+def test_resync_resolves_records_cg_id_and_refreshes_rest(monkeypatch):
+    monkeypatch.setattr("updaters.crypto.notion.query_database", lambda db: [
+        {"id": "p1", "properties": {"Symbol": {"type": "rich_text", "rich_text": [{"text": {"content": "BTC"}}]}}},
+    ])
+    rest = _Rest()
+    updater = CryptoUpdater(_Cfg(), _Engine({}), coingecko=_CG(ids={"BTC": "bitcoin"}), rest=rest)
+    updater.resync()
+    assert [s.raw_symbol for s in updater.engine.coins] == ["BTC"]
+    assert updater.engine.coins[0].candidates[0].pair == "BTC/USD"
+    assert updater._cg_ids["p1"] == "bitcoin"
+    assert rest.calls == [["bitcoin"]]  # BTC нет в ws-снапшоте -> ушёл в REST
+
+
+def test_resync_includes_rest_only_coin(monkeypatch):
+    monkeypatch.setattr("updaters.crypto.notion.query_database", lambda db: [
+        {"id": "p1", "properties": {"Symbol": {"type": "rich_text", "rich_text": [{"text": {"content": "orochi-network"}}]}}},
+    ])
+    rest = _Rest()
+    updater = CryptoUpdater(
+        _Cfg(), _Engine({}),
+        coingecko=_CG(symbols={}, ids={"orochi-network": "orochi-network"}), rest=rest,
+    )
+    updater.resync()
+    # нет ws-пар, но монета записана и ушла в REST-fallback
+    assert updater._cg_ids["p1"] == "orochi-network"
+    assert rest.calls == [["orochi-network"]]
+
+
+def test_write_tick_uses_rest_fallback(monkeypatch):
+    writes = []
+    monkeypatch.setattr("updaters.crypto.notion.update_page", lambda pid, props: writes.append((pid, props)))
+    rest = _Rest()
+    rest.cache = {"orochi-network": PricePoint(0.1, 0.09, datetime.now(timezone.utc))}
+    updater = CryptoUpdater(_Cfg(), _Engine({}), coingecko=_CG(), rest=rest)
+    updater._pages = [("p1", "orochi-network")]
+    updater._cg_ids = {"p1": "orochi-network"}
+    updater.write_tick()
+    assert len(writes) == 1
+    assert writes[0][1]["Price"]["number"] == 0.1
+
+
+def test_refresh_rest_skips_covered_and_disabled(monkeypatch):
+    rest = _Rest()
+    updater = CryptoUpdater(_Cfg(), _Engine({}), coingecko=_CG(), rest=rest)
+    updater._pages = [("p1", "BTC"), ("p2", "orochi-network")]
+    updater._cg_ids = {"p1": "bitcoin", "p2": "orochi-network"}
+    updater.engine._snapshot = {"BTC": PricePoint(1.0, 1.0, datetime.now(timezone.utc))}
+    updater.refresh_rest()
+    assert rest.calls == [["orochi-network"]]  # BTC покрыт ws -> не запрашиваем
+
+    cfg = _Cfg()
+    cfg.rest_seconds = 0
+    rest2 = _Rest()
+    updater2 = CryptoUpdater(cfg, _Engine({}), coingecko=_CG(), rest=rest2)
+    updater2._pages = [("p1", "orochi-network")]
+    updater2._cg_ids = {"p1": "orochi-network"}
+    updater2.refresh_rest()
+    assert rest2.calls == []  # REST выключен
