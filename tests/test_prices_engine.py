@@ -83,3 +83,17 @@ def test_snapshot_prefers_kraken_over_coinbase():
     engine._prices["kraken:BTC/USD"] = PricePoint(100.0, 75.0, datetime.now(timezone.utc))
     engine._prices["coinbase:BTC-USD"] = PricePoint(200.0, 175.0, datetime.now(timezone.utc))
     assert engine.snapshot()["BTC"].price == 100.0
+
+
+def test_handle_message_warns_once_per_pair(caplog):
+    import logging
+
+    engine = PriceEngine({"kraken": KrakenProvider()})
+    raw = (
+        '{"method":"subscribe","success":false,"error":"Unknown",'
+        '"params":{"channel":"ticker","symbol":["NOPE/USD"]}}'
+    )
+    with caplog.at_level(logging.WARNING, logger="prices.engine"):
+        engine._handle_message(engine._providers["kraken"], raw)
+        engine._handle_message(engine._providers["kraken"], raw)
+    assert sum("NOPE/USD" in r.message for r in caplog.records) == 1

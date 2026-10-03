@@ -130,7 +130,7 @@ class PriceEngine:
                         pass
                 with self._lock:
                     self._subscribed[name].clear()
-                self._warned = {k for k in self._warned if k[0] != name}
+                    self._warned = {k for k in self._warned if k[0] != name}
 
     def _pending_sync(self, name: str) -> bool:
         with self._lock:
@@ -160,8 +160,11 @@ class PriceEngine:
                 self._prices[key] = point
             return
         error_pair = provider.parse_error(raw)
-        if error_pair is not None:
-            key = (provider.name, error_pair)
-            if key not in self._warned:
-                self._warned.add(key)
-                logger.warning("Провайдер %s: ошибка подписки на %r", provider.name, error_pair)
+        if error_pair is None:
+            return
+        key = (provider.name, error_pair)
+        with self._lock:
+            if key in self._warned:
+                return
+            self._warned.add(key)
+        logger.warning("Провайдер %s: ошибка подписки на %r", provider.name, error_pair)
