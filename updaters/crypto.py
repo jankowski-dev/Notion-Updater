@@ -83,7 +83,6 @@ class CryptoUpdater:
 
     def write_tick(self) -> dict:
         snapshot = self.engine.snapshot()
-        now = datetime.now(timezone.utc)
         now_mono = time.monotonic()
         updated = 0
         skipped = 0
