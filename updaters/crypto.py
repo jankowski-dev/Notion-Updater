@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -49,6 +50,8 @@ class CryptoUpdater:
         self._pages: list[tuple[str, str]] = []  # (page_id, raw_symbol)
         self._last: dict[str, tuple[float, float | None]] = {}
         self._last_write: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._stale_warned: set[str] = set()
 
     def resync(self) -> None:
         logger.info("Крипта: перечитываю базу Notion %s", self.config.database_id)
@@ -74,35 +77,49 @@ class CryptoUpdater:
             page_pairs.append((page_id, raw))
 
         self.engine.set_coins(specs)
-        removed = {pid for pid, _ in self._pages} - {pid for pid, _ in page_pairs}
-        for pid in removed:
-            self._last.pop(pid, None)
-            self._last_write.pop(pid, None)
-        self._pages = page_pairs
+        with self._lock:
+            removed = {pid for pid, _ in self._pages} - {pid for pid, _ in page_pairs}
+            for pid in removed:
+                self._last.pop(pid, None)
+                self._last_write.pop(pid, None)
+                self._stale_warned.discard(pid)
+            self._pages = page_pairs
         logger.info("Крипта: страниц с монетами %s", len(specs))
 
     def write_tick(self) -> dict:
         snapshot = self.engine.snapshot()
+        with self._lock:
+            pages = list(self._pages)
         now_mono = time.monotonic()
         updated = 0
         skipped = 0
         errors = 0
         heartbeat = 0
 
-        for page_id, raw in self._pages:
+        for page_id, raw in pages:
             point = snapshot.get(raw)
             if point is None:
+                with self._lock:
+                    first_time = page_id not in self._stale_warned
+                    self._stale_warned.add(page_id)
+                if first_time:
+                    logger.warning("Крипта: нет свежей цены для %r (страница %s)", raw, page_id)
                 skipped += 1
                 continue
 
-            previous = self._last.get(page_id)
+            with self._lock:
+                self._stale_warned.discard(page_id)
+                previous = self._last.get(page_id)
+
             if previous is not None and _same(previous[0], point.price) and _same(previous[1], point.yesterday):
-                heartbeat_seconds = self.config.heartbeat_seconds
-                last_write = self._last_write.get(page_id, 0.0)
-                if heartbeat_seconds and (now_mono - last_write) >= heartbeat_seconds:
+                hb = self.config.heartbeat_seconds
+                with self._lock:
+                    last_write = self._last_write.get(page_id, 0.0)
+                if hb and (now_mono - last_write) >= hb:
                     if self._write(page_id, point.price, point.yesterday, heartbeat_only=True):
+                        with self._lock:
+                            self._last_write[page_id] = now_mono
                         heartbeat += 1
-                        self._last_write[page_id] = now_mono
                     else:
                         errors += 1
                 else:
@@ -110,13 +127,17 @@ class CryptoUpdater:
                 continue
 
             if self._write(page_id, point.price, point.yesterday):
+                with self._lock:
+                    self._last[page_id] = (point.price, point.yesterday)
+                    self._last_write[page_id] = now_mono
                 updated += 1
-                self._last[page_id] = (point.price, point.yesterday)
-                self._last_write[page_id] = now_mono
             else:
                 errors += 1
 
-        logger.info("Крипта: записано=%s пропущено=%s ошибок=%s пульс=%s (из %s)", updated, skipped, errors, heartbeat, len(self._pages))
+        logger.info(
+            "Крипта: записано=%s пропущено=%s ошибок=%s пульс=%s (из %s)",
+            updated, skipped, errors, heartbeat, len(pages),
+        )
         return {"updated": updated, "skipped": skipped, "errors": errors, "heartbeat": heartbeat}
 
     def _write(self, page_id: str, price: float, yesterday: float | None, heartbeat_only: bool = False) -> bool:

@@ -36,6 +36,7 @@ class PriceEngine:
         self._subscribed: dict[str, set[str]] = {name: set() for name in providers}
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._warned: set[tuple[str, str]] = set()
 
     # ---- lifecycle ----
     def start(self) -> None:
@@ -129,6 +130,7 @@ class PriceEngine:
                         pass
                 with self._lock:
                     self._subscribed[name].clear()
+                self._warned = {k for k in self._warned if k[0] != name}
 
     def _pending_sync(self, name: str) -> bool:
         with self._lock:
@@ -159,4 +161,7 @@ class PriceEngine:
             return
         error_pair = provider.parse_error(raw)
         if error_pair is not None:
-            logger.warning("Провайдер %s: ошибка подписки на %r", provider.name, error_pair)
+            key = (provider.name, error_pair)
+            if key not in self._warned:
+                self._warned.add(key)
+                logger.warning("Провайдер %s: ошибка подписки на %r", provider.name, error_pair)

@@ -72,3 +72,14 @@ def test_handle_message_updates_prices():
     raw = '{"channel":"ticker","type":"update","data":[{"symbol":"BTC/USD","last":10,"change":1}]}'
     engine._handle_message(engine._providers["kraken"], raw)
     assert engine._prices["kraken:BTC/USD"].price == 10.0
+
+
+def test_snapshot_prefers_kraken_over_coinbase():
+    engine = PriceEngine({"kraken": KrakenProvider(), "coinbase": KrakenProvider()})
+    engine.set_coins([
+        CoinSpec(page_id="p1", raw_symbol="BTC",
+                 candidates=[ResolvedCoin("kraken", "BTC/USD"), ResolvedCoin("coinbase", "BTC-USD")]),
+    ])
+    engine._prices["kraken:BTC/USD"] = PricePoint(100.0, 75.0, datetime.now(timezone.utc))
+    engine._prices["coinbase:BTC-USD"] = PricePoint(200.0, 175.0, datetime.now(timezone.utc))
+    assert engine.snapshot()["BTC"].price == 100.0

@@ -96,3 +96,15 @@ def test_resync_resolves_and_sets_coins(monkeypatch):
     updater.resync()
     assert [s.raw_symbol for s in updater.engine.coins] == ["BTC"]
     assert updater.engine.coins[0].candidates[0].pair == "BTC/USD"
+
+
+def test_write_tick_logs_stale_warning(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr("updaters.crypto.notion.update_page", lambda pid, props: None)
+    updater = CryptoUpdater(_Cfg(), _Engine({}))
+    updater._pages = [("p1", "BTC")]
+    with caplog.at_level(logging.WARNING, logger="updaters.crypto"):
+        result = updater.write_tick()
+    assert result["skipped"] == 1
+    assert any("нет свежей цены" in r.message for r in caplog.records)

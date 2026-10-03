@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Callable
 
 import requests
@@ -74,13 +75,15 @@ def resolve_candidates(
 class CoinGeckoList:
     """Ленивый справочник id/symbol -> symbol из CoinGecko /coins/list."""
 
-    def __init__(self) -> None:
+    def __init__(self, cooldown_seconds: float = 300.0) -> None:
         self._by_id: dict[str, str] = {}
         self._by_symbol: dict[str, str] = {}
         self._loaded = False
+        self._retry_after = 0.0
+        self._cooldown = cooldown_seconds
 
     def symbol_for(self, value: str) -> str | None:
-        if not self._loaded:
+        if not self._loaded and time.monotonic() >= self._retry_after:
             self._load()
         key = value.strip().lower()
         return self._by_id.get(key) or self._by_symbol.get(key)
@@ -96,6 +99,7 @@ class CoinGeckoList:
             self._loaded = True
             logger.info("CoinGecko /coins/list: %s записей", len(self._by_id))
         except Exception as e:  # noqa: BLE001 — справочник необязателен
+            self._retry_after = time.monotonic() + self._cooldown
             logger.warning("Не удалось загрузить CoinGecko /coins/list: %s", e)
 
     def _fetch(self) -> list[dict]:

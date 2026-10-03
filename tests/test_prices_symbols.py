@@ -43,3 +43,17 @@ def test_coingecko_list_matches_id_and_symbol(monkeypatch):
     assert cg.symbol_for("bitcoin") == "btc"
     assert cg.symbol_for("BTC") == "btc"
     assert cg.symbol_for("nope") is None
+
+
+def test_coingecko_list_failure_cooldown(monkeypatch):
+    cg = CoinGeckoList(cooldown_seconds=300.0)
+    calls = {"n": 0}
+
+    def boom():
+        calls["n"] += 1
+        raise RuntimeError("net down")
+
+    monkeypatch.setattr(cg, "_fetch", boom)
+    assert cg.symbol_for("bitcoin") is None
+    assert cg.symbol_for("solana") is None
+    assert calls["n"] == 1  # в пределах cooldown сеть не дёргаем повторно
